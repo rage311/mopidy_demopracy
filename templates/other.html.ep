@@ -1,0 +1,1 @@
+{"jsonrpc": "2.0", "id": 1, "result": [{"__model__": "SearchResult", "artists": [{"__model__": "Artist", "name": "Kimbra", "uri": "spotify:artist:6hk7Yq1DU9QcCCrz9uc0Ti"}, {"__model__": "Artist", "name": "Kimbra Snay", "uri": "spotify:artist:6hFYKCmm4Yn5j5SNOx4GNJ"}, {"__model__": "Artist", "name": "Kimbra Westervelt", "uri": "spotify:artist:0rl3mbAZxRV1NnIU4zEroL"}]}]
