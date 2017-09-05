@@ -1,3 +1,4 @@
+%# vim: set syntax=html:
 % layout 'default';
 % title 'jukebox';
 <div id="app">

@@ -6,6 +6,79 @@ use DDP;
 
 my $clients = {};
 
+use constant MOPIDY_IP          => '10.0.0.121';
+use constant MOPIDY_PORT        => '6680';
+use constant BASE_PLAYLIST_URI =>
+  'spotify:user:rage_311:playlist:5u9o0va3hiIhmlkw70voES';
+
+# For shuffling instead of random?
+my $base_tracks_played = {};
+
+my $base_playlist;
+
+helper do_jukebox_things => sub {
+  my $c = shift;
+
+  # Set consume mode (core.tracklist.consume = 1)
+  $c->send_mopidy_message('core.tracklist.set_consume', [ 1 ]);
+
+  # Find base playlist
+  $c->send_mopidy_message(
+    'core.library.lookup',
+    [ BASE_PLAYLIST_URI ],
+    sub {
+      my ($ua, $tx) = @_;
+      p $tx->result->json;
+      $base_playlist = $tx->result->json if $tx->result;
+    },
+  );
+
+  srand;
+  # Add random track to tracklist (if tracklist length < 1)
+  #
+  # core.playback.play
+
+  # Find base playlist
+  $c->send_mopidy_message(
+    'core.playback.play',
+    [],
+    sub {
+      my ($ua, $tx) = @_;
+      p $tx->result->json;
+    },
+  );
+
+  # Listen for track_playback_ended event to check if another random track
+  # needs to be added
+  #
+};
+
+
+my $mopidy_url = Mojo::URL->new
+  ->scheme('http')
+  ->host(MOPIDY_IP)
+  ->port(MOPIDY_PORT)
+  ->path('/mopidy/rpc');
+
+helper send_mopidy_message => sub {
+  my ($c, $method, $params, $cb, $id) = @_;
+
+  return undef unless $method;
+  return undef if defined $params && ref $params ne ref [];
+
+  my $mopidy_json = {
+    jsonrpc => '2.0',
+    id      => $id // time * 1000,
+    method  => $method,
+    params  => $params,
+  };
+
+  $c->ua->post($mopidy_url => json => $mopidy_json => sub { $cb->(@_) });
+
+
+  #$c->ws(sub { shift->send({ json => $mopidy_json }) });
+};
+
 
 helper client_ws_reply => sub {
   my ($c, $json) = @_;
@@ -61,9 +134,9 @@ helper ws => sub {
       my ($ua, $tx) = @_;
 
       # needed for full base playlist size -- not sure what limit it really needs
-      $tx->max_websocket_size(2621440);
 
       say 'WebSocket handshake failed!' and return unless $tx->is_websocket;
+      $tx->max_websocket_size(2621440);
       #say 'Subprotocol negotiation failed!' and return unless $tx->protocol;
 
       $tx->on(finish => sub {
@@ -141,6 +214,7 @@ helper get_tracklist => sub {
 #helper master_tracklist => sub { state $master_tracklist = shift->get_tracklist; };
 #helper votes            => sub { state $votes = {}; };
 
+my $whatever = app->do_jukebox_things;
 my $master_tracklist = app->ws(sub { app->get_tracklist() });
 my $votes = {};
 
@@ -229,16 +303,13 @@ any '/vote' => sub {
   #  json => {error => 'unable to retrieve votes (track may not be in TL any more'}
   #) unless defined $votes_ref;
 
-  if (my $vote = $votes->{$tlid}{$ip}) {
-    say "$vote->{value} == $value ";
-    if ($vote->{value} == $value) {
-      $vote->{value} = 0;
-    } else {
-      $vote->{value} = $value;
-    }
+  my $vote = {};
+  # Check if the IP has a vote for this tlid already
+  if ($vote = $votes->{$tlid}{$ip}) {
+    $vote->{value} = $vote->{value} == $value ? 0 : $value;
     $vote->{time} = time;
   } else {
-    $votes->{$tlid}{$ip} = {
+    $vote = $votes->{$tlid}{$ip} = {
       ip    => $ip,
       value => $value,
       name  => 'matt',
@@ -246,7 +317,7 @@ any '/vote' => sub {
     };
   }
 
-  say 'votes';
+  p $vote;
   #p $votes;
   $c->send_tracklist;
   return $c->render(text => $value);
