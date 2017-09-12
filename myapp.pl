@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 
 use Mojolicious::Lite;
+use Mojo::JSON qw(true false);
 use DDP;
 
 
@@ -16,11 +17,12 @@ my $base_tracks_played = {};
 
 my $base_playlist;
 
+
 helper do_jukebox_things => sub {
   my $c = shift;
 
   # Set consume mode (core.tracklist.consume = 1)
-  $c->send_mopidy_message('core.tracklist.set_consume', [ 1 ]);
+  $c->send_mopidy_message('core.tracklist.set_consume', [ true ]);
 
   # Find base playlist
   $c->send_mopidy_message(
@@ -28,7 +30,7 @@ helper do_jukebox_things => sub {
     [ BASE_PLAYLIST_URI ],
     sub {
       my ($ua, $tx) = @_;
-      p $tx->result->json;
+      #p $tx->result->json;
       $base_playlist = $tx->result->json if $tx->result;
     },
   );
@@ -73,8 +75,14 @@ helper send_mopidy_message => sub {
     params  => $params,
   };
 
-  $c->ua->post($mopidy_url => json => $mopidy_json => sub { $cb->(@_) });
+  my $res = $c->ua->post(
+    $mopidy_url => json => $mopidy_json => sub { $cb->(@_) if $cb });
+  #);
 
+  #$cb->($res->tx);
+
+  #say 'hi';
+  #p $res->json if $res;
 
   #$c->ws(sub { shift->send({ json => $mopidy_json }) });
 };
@@ -394,6 +402,29 @@ websocket '/ws' => sub {
   });
 };
 
+post '/play' => sub {
+  my $c = shift;
+  $c->send_mopidy_message('core.playback.play', [], sub {});
+  $c->render(text => 1);
+};
+
+post '/pause' => sub {
+  my $c = shift;
+  $c->send_mopidy_message('core.playback.pause', [], sub {});
+  $c->render(text => 1);
+};
+
+post '/stop' => sub {
+  my $c = shift;
+  $c->send_mopidy_message('core.playback.stop', [], sub {});
+  $c->render(text => 1);
+};
+
+post '/next' => sub {
+  my $c = shift;
+  $c->send_mopidy_message('core.playback.next', [], sub {});
+  $c->render(text => 1);
+};
 
 get '/' => sub {
   my $c = shift;

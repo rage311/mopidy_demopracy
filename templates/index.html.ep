@@ -6,7 +6,13 @@
     <span class="progress-bar" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 60%;">
       Hello
     </span>
-  </div>Again
+  </div>
+  <div style="text-align:center">
+    <span class="fa fa-play" v-on:click="playbackControl('play')" style="cursor:pointer;font-size:24px;padding-right:5px;padding-left:5px"></span>
+    <span class="fa fa-pause" v-on:click="playbackControl('pause')" style="cursor:pointer;font-size:24px;padding-right:5px;padding-left:5px"></span>
+    <span class="fa fa-stop" v-on:click="playbackControl('stop')" style="cursor:pointer;font-size:24px;padding-right:5px;padding-left:5px"></span>
+    <span class="fa fa-step-forward" v-on:click="playbackControl('next')" style="cursor:pointer;font-size:24px;padding-right:5px;padding-left:5px"></span>
+  </div>
   <table class="table table-striped" id="tracklist">
     <tbody>
       <tr v-for="(track, idx) in tracklist">
@@ -98,6 +104,7 @@
         });
         return total > 0 ? '+' + total : total;
       },
+
       artistsString: function(artists) {
         var returnString = artists[0].name;
         //console.log(artists);
@@ -108,6 +115,13 @@
         }
         return returnString;
       },
+
+      playbackControl: function(value) {
+        $.post('/' + value, function(data) {
+          console.log('playbackControl data: ' + data);
+        })
+      },
+
       submitVote: function(tlid, value) {
         var postData = {
           "tlid": tlid,
