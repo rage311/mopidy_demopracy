@@ -1,7 +1,9 @@
 #!/usr/bin/env perl
 
+use 5.026;
 use Mojolicious::Lite;
 use Mojo::JSON qw(true false);
+use List::Util qw(reduce);
 use DDP;
 
 
@@ -18,37 +20,67 @@ my $base_tracks_played = {};
 my $base_playlist;
 
 
+my $reordering_tracklist = 0;
+
 helper do_jukebox_things => sub {
   my $c = shift;
+  srand;
 
   # Set consume mode (core.tracklist.consume = 1)
   $c->send_mopidy_message('core.tracklist.set_consume', [ true ]);
 
-  # Find base playlist
-  $c->send_mopidy_message(
-    'core.library.lookup',
-    [ BASE_PLAYLIST_URI ],
-    sub {
-      my ($ua, $tx) = @_;
-      #p $tx->result->json;
-      $base_playlist = $tx->result->json if $tx->result;
-    },
-  );
+  my $attempts = 0;
+  until ($base_playlist || $attempts >= 3) {
+    warn 'getting base playlist';
+    # Find base playlist
+    my $result = $c->send_mopidy_message(
+      'core.library.lookup',
+      [ BASE_PLAYLIST_URI ],
+    );
+    $base_playlist = $result->json->{result};
+    sleep 1;
+  }
 
-  srand;
+  return undef unless $base_playlist;
+
+  $c->maybe_add_new_track;
+};
+
+helper maybe_add_new_track => sub {
+  my $c = shift;
+
+  warn 'get_length';
   # Add random track to tracklist (if tracklist length < 1)
-  #
-  # core.playback.play
-
-  # Find base playlist
-  $c->send_mopidy_message(
-    'core.playback.play',
+  # Get tracklist length
+  my $result = $c->send_mopidy_message(
+    'core.tracklist.get_length',
     [],
-    sub {
-      my ($ua, $tx) = @_;
-      p $tx->result->json;
-    },
   );
+
+  my $length = $result->json->{result} if $result;
+  say "length: $length";
+  if ($length < 1) {
+    warn 'tracklist.add';
+    $result = $c->send_mopidy_message(
+      'core.tracklist.add',
+      { uri => $base_playlist->[int(rand $#$base_playlist)]{uri} },
+    );
+    p $result->json;
+  }
+
+  my $playback_state = $c->send_mopidy_message(
+    'core.playback.get_state',
+    [],
+  )->json->{result};
+  p $playback_state;
+
+  unless ($playback_state eq 'playing') {
+    # Start playing
+    $result = $c->send_mopidy_message(
+      'core.playback.play',
+      [],
+    );
+  }
 
   # Listen for track_playback_ended event to check if another random track
   # needs to be added
@@ -66,7 +98,10 @@ helper send_mopidy_message => sub {
   my ($c, $method, $params, $cb, $id) = @_;
 
   return undef unless $method;
-  return undef if defined $params && ref $params ne ref [];
+  #return undef if defined $params && (
+  #ref $params ne ref [] || ref $params ne ref {}
+  #);
+  warn "here, method: $method";
 
   my $mopidy_json = {
     jsonrpc => '2.0',
@@ -76,8 +111,14 @@ helper send_mopidy_message => sub {
   };
 
   my $res = $c->ua->post(
-    $mopidy_url => json => $mopidy_json => sub { $cb->(@_) if $cb });
+    $mopidy_url => json => $mopidy_json
+  )->result;#=> sub { $cb->(@_) if $cb });
   #);
+
+  if ($cb) {
+    return $cb->($res);
+  }
+  return $res;
 
   #$cb->($res->tx);
 
@@ -118,9 +159,11 @@ helper process_event => sub {
   my ($c, $json) = @_;
 
   warn "event: $json->{event}";
-  p $json;
-  if ($json->{event} eq 'tracklist_changed') {
-    $c->get_tracklist;
+  #p $json;
+  if ($json->{event} eq 'tracklist_changed' && $reordering_tracklist == 0) {
+    #$c->get_tracklist;
+  } elsif ($json->{event} eq 'track_playback_ended') {
+    $c->maybe_add_new_track;
   }
 
   #p $clients;
@@ -260,6 +303,8 @@ helper populate_tracklist => sub {
   $master_tracklist->{array} = $tracklist_array;
   $master_tracklist->{hash}  = $tracklist_hash;
 
+  my $ordered_tracklist = $c->order_tracklist_by_votes;
+  $c->reorder_mopidy_tracklist($ordered_tracklist);
   $c->send_tracklist;
 };
 
@@ -298,8 +343,6 @@ any '/vote' => sub {
   my $value     = $c->param('value');
   my $username  = $c->param('username');
 
-  #TODO: need vote timestamp to break ties -- newest is last
-
   # Use Mojo's validator instead
   $value //= 0;
   $value = -1 if $value < -1;
@@ -320,6 +363,7 @@ any '/vote' => sub {
     $vote = $votes->{$tlid}{$ip} = {
       ip    => $ip,
       value => $value,
+      # TODO: make this user-entered
       name  => 'matt',
       time  => time,
     };
@@ -327,8 +371,83 @@ any '/vote' => sub {
 
   p $vote;
   #p $votes;
+  my $ordered_tracklist = $c->order_tracklist_by_votes;
+  $c->reorder_mopidy_tracklist($ordered_tracklist);
+  # TODO: only move track that was voted on -- need old position, new position
   $c->send_tracklist;
   return $c->render(text => $value);
+};
+
+
+helper order_tracklist_by_votes => sub {
+  my $c = shift;
+  #p $master_tracklist;
+
+  my $ordered_tracklist = [
+    # Return track itself
+    map { $_->[0] }
+
+    # Sort by vote total, then by oldest timestamp
+    sort  { $b->[1] <=> $a->[1] || $a->[2] <=> $b->[2] }
+
+    # Creates array ref of obj, vote_total, oldest_timestamp arrays
+    map   {
+      my @votes = values $_->{votes}->%*;
+
+      my $vote_sum = reduce {
+        $a + $b->{value}
+      } 0, @votes;
+
+      my $oldest_time = reduce {
+        $a < $b->{time} ? $a : $b->{time}
+      } 9999999999, @votes;
+      #say $oldest_time;
+
+      [ $_, $vote_sum, $oldest_time ]
+    } @{$master_tracklist->{array}}[1..$#{$master_tracklist->{array}}]
+  ];
+
+  unshift @$ordered_tracklist, $master_tracklist->{array}[0];
+
+  warn 'ordered_tracklist';
+  #p $ordered_tracklist;
+  #$master_tracklist->{array} = $ordered_tracklist;
+  return $ordered_tracklist;
+};
+
+helper reorder_mopidy_tracklist => sub {
+  my ($c, $ordered_tracklist) = @_;
+  #my $track (@{$ordered_tracklist}[1..$#{master_tracklist->{array}}) {
+
+  my %tlid_order = map {
+    #p $_;
+    ($ordered_tracklist->[$_]{tlid} => $_)
+  } 1..$#{$ordered_tracklist};
+  say 'TLID_ORDER';
+  p %tlid_order;
+
+  $reordering_tracklist = 1;
+  for (my $i = 1; $i < $master_tracklist->{array}->@*; $i++) {
+    my $to_position = $tlid_order{$master_tracklist->{array}[$i]{tlid}};
+    my $thing = {
+        start       => $i,
+        end         => $i,
+        to_position => $to_position,
+      };
+    p $thing;
+    if ($i != $to_position) {
+      my $result = $c->send_mopidy_message(
+        'core.tracklist.move',
+        {
+          start       => $i,
+          end         => $i,
+          to_position => $to_position,
+        }
+      );
+      p $result->json;
+    }
+  }
+  $reordering_tracklist = 0;
 };
 
 
