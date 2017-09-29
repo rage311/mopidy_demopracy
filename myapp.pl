@@ -160,7 +160,7 @@ helper process_event => sub {
 
   warn "event: $json->{event}";
   #p $json;
-  if ($json->{event} eq 'tracklist_changed' && $reordering_tracklist == 0) {
+  if ($json->{event} eq 'tracklist_changed') {# && $reordering_tracklist == 0) {
     #$c->get_tracklist;
   } elsif ($json->{event} eq 'track_playback_ended') {
     $c->maybe_add_new_track;
@@ -372,9 +372,40 @@ any '/vote' => sub {
   p $vote;
   #p $votes;
   my $ordered_tracklist = $c->order_tracklist_by_votes;
-  $c->reorder_mopidy_tracklist($ordered_tracklist);
+
+  $master_tracklist->{hash}{$tlid};
+
+  my ($current_idx, $move_to_index);
+  for (my $i = 0; $i < $master_tracklist->{array}->@*; $i++) {
+    if ($master_tracklist->{array}[$i]{tlid}) {
+      $current_idx = $i;
+      last;
+    }
+  }
+
+  for (my $i = 0; $i < $ordered_tracklist->@*; $i++) {
+    if ($ordered_tracklist[$i]{tlid}) {
+      $move_to_idx = $i;
+      last;
+    }
+  }
+
+  unless ($current_idx == $move_to_idx) {
+    my $result = $c->send_mopidy_message(
+      'core.tracklist.move',
+      {
+        start       => $current_idx,
+        end         => $current_idx,
+        to_position => $move_to_idx,
+      }
+    );
+    p $result->json;
+  }
+
+  #$c->reorder_mopidy_tracklist($ordered_tracklist);
+
   # TODO: only move track that was voted on -- need old position, new position
-  $c->send_tracklist;
+  #$c->send_tracklist;
   return $c->render(text => $value);
 };
 
