@@ -54,7 +54,9 @@
       var self = this;
       console.log('ready');
       // Create WebSocket connection.
-      self.socket = new WebSocket('ws://10.0.0.121:3000/ws');
+      //self.socket = new WebSocket('ws://10.0.0.121:3000/ws');
+      self.socket = new WebSocket('ws://<%= $c->req->url->to_abs->host_port %>/ws');
+      console.log('<%= $c->req->url->to_abs->host_port %>');
 
       // Connection opened
       self.socket.addEventListener('open', function (event) {

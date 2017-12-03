@@ -1,6 +1,13 @@
 #!/usr/bin/env perl
 
 use 5.026;
+use strict;
+use warnings;
+
+use lib '.';
+
+use API::Mopidy;
+use Mojo::Base -strict;
 use Mojolicious::Lite;
 use Mojo::JSON qw(true false);
 use List::Util qw(reduce);
@@ -9,41 +16,62 @@ use DDP;
 
 my $clients = {};
 
-use constant MOPIDY_IP          => '10.0.0.121';
+use constant MOPIDY_HOST        => '10.0.0.121';
 use constant MOPIDY_PORT        => '6680';
-use constant BASE_PLAYLIST_URI =>
+use constant BASE_PLAYLIST_URI  =>
   'spotify:user:rage_311:playlist:5u9o0va3hiIhmlkw70voES';
+
+helper mopidy => sub {
+  my $c = shift;
+
+  state $mopidy;
+  return $mopidy if ref $mopidy eq 'API::Mopidy';
+
+  $mopidy = API::Mopidy->new(host => MOPIDY_HOST);
+  $mopidy->on(error => sub { p $_[1]; });
+  $mopidy->on(event => \&{$c->process_event});
+  $mopidy->on(message => sub { say 'Mopidy message:'; p $_[0] });
+
+  $mopidy->connect
+    ->then(sub { return $_[0] })
+    ->catch(sub { die 'Mopidy connection error' })
+    ->wait;
+
+  return $mopidy;
+};
 
 # For shuffling instead of random?
 my $base_tracks_played = {};
 
 my $base_playlist;
 
-
 my $reordering_tracklist = 0;
 
-helper do_jukebox_things => sub {
+helper jukebox_init => sub {
   my $c = shift;
   srand;
 
   # Set consume mode (core.tracklist.consume = 1)
-  $c->send_mopidy_message('core.tracklist.set_consume', [ true ]);
+  $c->mopidy->send('tracklist.set_consume', [ true ]);
 
-  my $attempts = 0;
-  until ($base_playlist || $attempts >= 3) {
-    warn 'getting base playlist';
-    # Find base playlist
-    my $result = $c->send_mopidy_message(
-      'core.library.lookup',
-      [ BASE_PLAYLIST_URI ],
-    );
-    $base_playlist = $result->json->{result};
-    sleep 1;
-  }
+  $c->mopidy->send('library.lookup', [ BASE_PLAYLIST_URI ] => sub {
+    die 'No base playlist found' if $_[0]->{error};
+    $base_playlist = shift->{result};
+    $c->maybe_add_new_track;
+  });
+};
 
-  return undef unless $base_playlist;
+helper play_if_stopped => sub {
+  my $c = shift;
 
-  $c->maybe_add_new_track;
+  $c->mopidy->send('playback.get_state' => sub {
+    my $playback_state = shift->{result};
+    p $playback_state;
+
+    return if $playback_state eq 'playing';
+    # Start playing
+    $c->mopidy->send('playback.play');
+  });
 };
 
 helper maybe_add_new_track => sub {
@@ -52,81 +80,23 @@ helper maybe_add_new_track => sub {
   warn 'get_length';
   # Add random track to tracklist (if tracklist length < 1)
   # Get tracklist length
-  my $result = $c->send_mopidy_message(
-    'core.tracklist.get_length',
-    [],
-  );
+  $c->mopidy->send('tracklist.get_length' => sub {
+    my $length = shift->{result} // 0;
+    return unless $length < 1;
 
-  my $length = $result->json->{result} if $result;
-  say "length: $length";
-  if ($length < 1) {
     warn 'tracklist.add';
-    $result = $c->send_mopidy_message(
-      'core.tracklist.add',
+    $c->mopidy->send(
+      'tracklist.add',
       { uri => $base_playlist->[int(rand $#$base_playlist)]{uri} },
+      \&{$c->play_if_stopped},
     );
-    p $result->json;
-  }
-
-  my $playback_state = $c->send_mopidy_message(
-    'core.playback.get_state',
-    [],
-  )->json->{result};
-  p $playback_state;
-
-  unless ($playback_state eq 'playing') {
-    # Start playing
-    $result = $c->send_mopidy_message(
-      'core.playback.play',
-      [],
-    );
-  }
+  });
 
   # Listen for track_playback_ended event to check if another random track
   # needs to be added
   #
 };
 
-
-my $mopidy_url = Mojo::URL->new
-  ->scheme('http')
-  ->host(MOPIDY_IP)
-  ->port(MOPIDY_PORT)
-  ->path('/mopidy/rpc');
-
-helper send_mopidy_message => sub {
-  my ($c, $method, $params, $cb, $id) = @_;
-
-  return undef unless $method;
-  #return undef if defined $params && (
-  #ref $params ne ref [] || ref $params ne ref {}
-  #);
-  warn "here, method: $method";
-
-  my $mopidy_json = {
-    jsonrpc => '2.0',
-    id      => $id // time * 1000,
-    method  => $method,
-    params  => $params,
-  };
-
-  my $res = $c->ua->post(
-    $mopidy_url => json => $mopidy_json
-  )->result;#=> sub { $cb->(@_) if $cb });
-  #);
-
-  if ($cb) {
-    return $cb->($res);
-  }
-  return $res;
-
-  #$cb->($res->tx);
-
-  #say 'hi';
-  #p $res->json if $res;
-
-  #$c->ws(sub { shift->send({ json => $mopidy_json }) });
-};
 
 
 helper client_ws_reply => sub {
@@ -169,54 +139,6 @@ helper process_event => sub {
   #p $clients;
   #$_->send({ json => $json }) for values %$clients;
 };
-
-
-helper ws => sub {
-  my ($c, $cb) = @_;
-
-  #p $cb;
-  state $ws;
-  return Mojo::IOLoop->next_tick(sub { $cb->($ws) }) if $ws;
-
-  $c->ua->inactivity_timeout(0)->websocket(
-    'ws://10.0.0.121:6680/mopidy/ws'                        =>
-    { 'Sec-WebSocket-Extensions' => 'permessage-deflate' }  =>
-    sub {
-      my ($ua, $tx) = @_;
-
-      # needed for full base playlist size -- not sure what limit it really needs
-
-      say 'WebSocket handshake failed!' and return unless $tx->is_websocket;
-      $tx->max_websocket_size(2621440);
-      #say 'Subprotocol negotiation failed!' and return unless $tx->protocol;
-
-      $tx->on(finish => sub {
-        my ($tx, $code, $reason) = @_;
-        say "WebSocket closed with status $code.";
-      });
-
-      $tx->on(json => sub {
-        my ($tx, $json) = @_;
-        p $json;
-
-        if ($json->{event}) {
-          $c->process_event($json);
-        }
-        elsif ($json->{jsonrpc} && $json->{id}) {
-          # response to a query
-          $c->client_ws_reply($json);
-        }
-      });
-
-      say 'mopidy websocket connected';
-      $ws = $tx;
-      $cb->($ws);
-    }
-  );
-
-  return undef;
-};
-
 
 # Join artists[] names into a comma-separated string
 helper make_artists_string => sub {
@@ -265,7 +187,9 @@ helper get_tracklist => sub {
 #helper master_tracklist => sub { state $master_tracklist = shift->get_tracklist; };
 #helper votes            => sub { state $votes = {}; };
 
-my $whatever = app->do_jukebox_things;
+my $whatever = app->jukebox_init;
+Mojo::IOLoop->start;
+
 my $master_tracklist = app->ws(sub { app->get_tracklist() });
 my $votes = {};
 
@@ -274,7 +198,7 @@ helper populate_tracklist => sub {
 
   say 'populate_tracklist';
 
-  return undef unless $result && ref $result eq ref [];
+  return unless $result && ref $result eq ref [];
 
   my $tracklist_array   = [];
   my $tracklist_hash    = {};
@@ -355,6 +279,7 @@ any '/vote' => sub {
   #) unless defined $votes_ref;
 
   my $vote = {};
+
   # Check if the IP has a vote for this tlid already
   if ($vote = $votes->{$tlid}{$ip}) {
     $vote->{value} = $vote->{value} == $value ? 0 : $value;
@@ -373,9 +298,9 @@ any '/vote' => sub {
   #p $votes;
   my $ordered_tracklist = $c->order_tracklist_by_votes;
 
-  $master_tracklist->{hash}{$tlid};
+  #$master_tracklist->{hash}{$tlid};
 
-  my ($current_idx, $move_to_index);
+  my ($current_idx, $move_to_idx);
   for (my $i = 0; $i < $master_tracklist->{array}->@*; $i++) {
     if ($master_tracklist->{array}[$i]{tlid}) {
       $current_idx = $i;
@@ -384,7 +309,7 @@ any '/vote' => sub {
   }
 
   for (my $i = 0; $i < $ordered_tracklist->@*; $i++) {
-    if ($ordered_tracklist[$i]{tlid}) {
+    if ($ordered_tracklist->[$i]{tlid}) {
       $move_to_idx = $i;
       last;
     }
@@ -446,6 +371,7 @@ helper order_tracklist_by_votes => sub {
   return $ordered_tracklist;
 };
 
+
 helper reorder_mopidy_tracklist => sub {
   my ($c, $ordered_tracklist) = @_;
   #my $track (@{$ordered_tracklist}[1..$#{master_tracklist->{array}}) {
@@ -454,18 +380,23 @@ helper reorder_mopidy_tracklist => sub {
     #p $_;
     ($ordered_tracklist->[$_]{tlid} => $_)
   } 1..$#{$ordered_tracklist};
+
   say 'TLID_ORDER';
   p %tlid_order;
 
   $reordering_tracklist = 1;
+
   for (my $i = 1; $i < $master_tracklist->{array}->@*; $i++) {
     my $to_position = $tlid_order{$master_tracklist->{array}[$i]{tlid}};
+
     my $thing = {
         start       => $i,
         end         => $i,
         to_position => $to_position,
       };
+
     p $thing;
+
     if ($i != $to_position) {
       my $result = $c->send_mopidy_message(
         'core.tracklist.move',
