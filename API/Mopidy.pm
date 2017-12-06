@@ -85,7 +85,7 @@ sub connect ($self) {
 
       # event
       if ($json->{event}) {
-        $self->emit($json->{event} => $json);
+        #$self->emit($json->{event} => $json);
         $self->emit(event => $json);
       }
 
@@ -99,7 +99,7 @@ sub connect ($self) {
         (delete $self->queue->{$json->{id}})->{cb}->($json)
           if defined $self->queue->{$json->{id}};
 
-        p $self->queue;
+          #p $self->queue;
       }
     });
 
@@ -120,7 +120,10 @@ sub connect ($self) {
 sub send { #($self, $method = '', $params = {}, $cb = sub {}) {
   my $self = shift;
   my $cb = ref $_[-1] eq 'CODE' ? pop : undef;
+
+  say 'SEND:';
   p @_;
+
   my ($method, $params) = @_;
 
   return $self->emit(error => { message => 'No method specified' })
@@ -141,7 +144,7 @@ sub send { #($self, $method = '', $params = {}, $cb = sub {}) {
     say 'CONNECTING...';
     $self->connect->then(sub { p @_ })->wait;
   }
-  p $self->ws;
+  #p $self->ws;
 
   return $self->emit(error => { message => 'Not a websocket' })
     unless $self->ws->is_websocket;
@@ -163,7 +166,7 @@ sub clean_queue ($self, $older_than = 60) {
       time - $self->queue->{$_}{time} > $older_than
     } keys $self->queue->%*;
 
-  p $self->queue;
+    #p $self->queue;
 
   return 1;
 };

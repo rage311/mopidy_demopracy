@@ -119,7 +119,7 @@
       },
 
       playbackControl: function(value) {
-        $.post('/' + value, function(data) {
+        $.post('/playback/' + value, function(data) {
           console.log('playbackControl data: ' + data);
         })
       },

@@ -23,7 +23,7 @@ helper mopidy => sub {
 
 helper mopidy_init => sub {
   shift->mopidy
-  #->on(error => sub { p $_[1]; })
+  ->on(error => sub { p $_[1]; })
   #->on(event => \&process_event)
     ->on(message => sub { say 'Mopidy message:'; p $_[0] })
     ->connect
