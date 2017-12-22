@@ -30,6 +30,7 @@ my $base_playlist;
 
 my $reordering_tracklist = 0;
 
+my $manual_stop = 0;
 
 #helper master_tracklist => sub { state $master_tracklist = shift->get_tracklist; };
 #helper votes            => sub { state $votes = {}; };
@@ -40,15 +41,15 @@ sub process_event {
 
   warn "event: $event->{event}";
   if ($event->{event} eq 'tracklist_changed') {# && $reordering_tracklist == 0) {
-    #app->maybe_add_new_track;
+    app->maybe_add_new_track;
     app->get_tracklist;
   }
-  elsif ($event->{event} eq 'track_playback_ended' ||
-      ($event->{event} eq 'playback_state_changed' &&
-       $event->{new_state} eq 'stopped' &&
-       $event->{old_state} eq 'playing'))
+  elsif ($event->{event} eq 'track_playback_ended')# ||
+      # ($event->{event} eq 'playback_state_changed' &&
+      #  $event->{new_state} eq 'stopped' &&
+      #  $event->{old_state} eq 'playing'))
   {
-    app->maybe_add_new_track;
+    #app->maybe_add_new_track;
   }
 
   #p $clients;
@@ -85,6 +86,8 @@ helper jukebox_init => sub {
     $base_playlist = shift->{result};
     app->maybe_add_new_track;
   });
+
+  app->play_if_stopped;
 };
 
 helper play_if_stopped => sub {
@@ -94,9 +97,9 @@ helper play_if_stopped => sub {
     my $playback_state = shift->{result};
     p $playback_state;
 
-    return if $playback_state eq 'playing';
+    return if $playback_state ne 'stopped';
     # Start playing
-    $c->mopidy->send('playback.play');
+    $c->mopidy->send('playback.play') unless $manual_stop;
   });
 };
 
@@ -106,18 +109,22 @@ helper maybe_add_new_track => sub {
   warn 'get_length';
   # Add random track to tracklist (if tracklist length < 1)
   # Get tracklist length
-  $c->mopidy->send('tracklist.get_length' => sub {
-    my $length = shift->{result} // 0;
-    say "length: $length";
-    return $length unless $length < 1;
+  $c->mopidy->send('tracklist.get_length')
+    ->then(sub {
+      say 'GOT length:';
+      p @_;
+      my $length = shift->{result} // 0;
+      say "length: $length";
+      return $length unless $length < 1;
 
-    warn 'tracklist.add';
-    $c->mopidy->send(
-      'tracklist.add',
-      { uri => $base_playlist->[int(rand $#$base_playlist)]{uri} },
-      \&{$c->play_if_stopped},
-    );
-  });
+      warn 'tracklist.add';
+      $c->mopidy->send(
+        'tracklist.add',
+        { uri => $base_playlist->[int(rand $#$base_playlist)]{uri} },
+        sub { app->play_if_stopped },
+      );
+    })
+    ->catch(sub { say 'error getting length' });
 
   # Listen for track_playback_ended event to check if another random track
   # needs to be added
@@ -471,6 +478,7 @@ websocket '/ws' => sub {
 
 any '/playback/:command' => sub {
   my $c = shift;
+  $manual_stop = $c->stash('command') eq 'stop';
   $c->mopidy->send('playback.' . $c->stash('command'));
   $c->render(text => 1);
 };

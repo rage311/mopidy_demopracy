@@ -3,15 +3,10 @@ package API::Mopidy;
 use 5.026;
 use Mojo::Base 'Mojo::EventEmitter', -signatures;
 
-# use feature qw( signatures );
-# no warnings qw( experimental::signatures );
-
 use Mojo::UserAgent;
 use Mojo::URL;
 use Mojo::Promise;
-use Mojo::Util 'monkey_patch';
-use Mojo::JSON qw(to_json from_json);
-use Carp 'croak';
+use Carp qw(carp croak);
 use DDP;
 
 # use constant MOPIDY_IP          => '10.0.0.121';
@@ -19,9 +14,10 @@ use DDP;
 # use constant BASE_PLAYLIST_URI  =>
 #   'spotify:user:rage_311:playlist:5u9o0va3hiIhmlkw70voES';
 
-has ua => sub { state $ua = Mojo::UserAgent->new->inactivity_timeout(0) };
-has ws => sub { state $ws = Mojo::Transaction->new };
-has [qw( host port )];
+has 'ua'   => sub { state $ua = Mojo::UserAgent->new->inactivity_timeout(0) };
+has 'ws';#   => sub { state $ws = Mojo::Transaction->new };
+has 'host' => sub { croak 'host is required' };
+has 'port';
 
 has queue => sub { state $cb = {} };
 
@@ -29,7 +25,7 @@ has url => sub {
   Mojo::URL->new
     ->scheme('ws')
     ->host($_[0]->host)
-    ->port($_[0]->port)
+    ->port($_[0]->port // 6680)
     ->path('/mopidy/ws');
 };
 
@@ -39,30 +35,8 @@ has options => sub {
   }
 };
 
-#sub queue { state $cb = {} };
-
-sub new ($class, %options) {
-  p %options;
-
-  croak 'Requires host' unless $options{host};# && $options->{port};
-
-  my $self = $class->SUPER::new;
-
-  $self->host($options{host});
-  $self->port($options{port} // 6680);
-
-  #$self->url($options);
-  p $self->url;
-
-  #croak "Unable to connect to mopidy: $!" unless $self->ws($self->_ws_connect);
-
-  p $self;
-  return $self;
-}
-
 
 sub _message_id { state $id = -1; ++$id };
-
 
 
 sub connect ($self) {
@@ -74,35 +48,12 @@ sub connect ($self) {
     # needed for full base playlist size -- not sure what limit it really needs
     $tx->max_websocket_size(2621440);
 
-    $tx->on(finish => sub {
-      my ($tx, $code, $reason) = @_;
+    $tx->on(finish => sub ($tx, $code, $reason) {
       say "WebSocket closed with status $code.";
       $self->emit(disconnected => $code);
     });
 
-    $tx->on(json => sub {
-      my ($tx, $json) = @_;
-
-      # event
-      if ($json->{event}) {
-        #$self->emit($json->{event} => $json);
-        $self->emit(event => $json);
-      }
-
-      # response to message
-      # successful message response
-      elsif ($json->{jsonrpc} && defined $json->{id}) {
-        #$self->patch_yoself($json) if $json->{id} eq 'core.describe';
-        $self->emit(error => $json) if $json->{error};
-        $self->emit(message => $json);
-
-        (delete $self->queue->{$json->{id}})->{cb}->($json)
-          if defined $self->queue->{$json->{id}};
-
-          #p $self->queue;
-      }
-    });
-
+    $tx->on(json => sub { $self->_ws_json(@_) });
 
     $self->ws($tx);
     $self->emit(connected => $tx);
@@ -111,6 +62,37 @@ sub connect ($self) {
   });
 
   return $p;
+}
+
+
+sub _ws_json ($self, $tx, $json) {
+  return $self->emit(event => $json) if $json->{event};
+  #$self->emit($json->{event} => $json);
+
+  $self->emit(message => $json);
+
+  # response to message
+  if ($json->{jsonrpc} && defined $json->{id}) {
+    if (my $q_item = delete $self->queue->{$json->{id}}) {
+      $self->emit(error => $json) if $json->{error};
+
+      # code callback
+      return $q_item->{cb}->($json) if ref $q_item->{cb} eq 'CODE';
+
+      # promise callback
+      return $q_item->{cb}->reject($json) if $json->{error};
+
+      return $q_item->{cb}->resolve($json);
+    } else {
+      carp 'message id not found in queue';
+      return;
+    }
+  }
+
+  #$self->patch_yoself($json) if $json->{id} eq 'core.describe';
+
+  say 'unknown _ws_json message:';
+  p $json;
 }
 
 
@@ -126,10 +108,19 @@ sub send { #($self, $method = '', $params = {}, $cb = sub {}) {
 
   my ($method, $params) = @_;
 
-  return $self->emit(error => { message => 'No method specified' })
-    unless $method;
+  #return $self->emit(error => { message => 'No method specified' })
+  croak 'No method specifed' unless $method;
 
   $method =~ s/^core\.//;
+
+  unless ($self->ws->is_websocket && $self->ws->established) {
+    say 'CONNECTING...';
+    $self->connect->then(sub { p @_ })->wait;
+  }
+  #p $self->ws;
+
+  return $self->emit(error => { message => 'Unable to connect to mopidy ws' })
+    unless $self->ws->is_websocket && $self->ws->established;
 
   my $message_id = $self->_message_id;
 
@@ -140,22 +131,18 @@ sub send { #($self, $method = '', $params = {}, $cb = sub {}) {
     params  => $params // {},
   };
 
-  unless ($self->ws->is_websocket && $self->ws->established) {
-    say 'CONNECTING...';
-    $self->connect->then(sub { p @_ })->wait;
-  }
-  #p $self->ws;
-
-  return $self->emit(error => { message => 'Not a websocket' })
-    unless $self->ws->is_websocket;
-
   $self->ws->send({ json => $mopidy_json });
 
-  $self->queue->{$message_id} = { cb => $cb, time => time } if $cb;
+  my $p = Mojo::Promise->new;
+
+  $self->queue->{$message_id} = {
+    cb   => $cb // $p, #sub { $p->resolve(shift) },
+    time => time,
+  };
 
   $self->clean_queue;
 
-  return $message_id;
+  return $cb ? $message_id : $p;
 }
 
 
@@ -165,10 +152,6 @@ sub clean_queue ($self, $older_than = 60) {
     grep {
       time - $self->queue->{$_}{time} > $older_than
     } keys $self->queue->%*;
-
-    #p $self->queue;
-
-  return 1;
 };
 
 
