@@ -66,7 +66,8 @@ sub connect ($self) {
 
 
 sub _ws_json ($self, $tx, $json) {
-  return $self->emit(event => $json) if $json->{event};
+  say 'API::Mopidy _ws_json: emit event' and
+    return $self->emit(event => $json) if $json->{event};
   #$self->emit($json->{event} => $json);
 
   $self->emit(message => $json);
@@ -99,12 +100,16 @@ sub _ws_json ($self, $tx, $json) {
 #TODO: call core.describe to get known methods for mopidy endpoint
 
 # send message to mopidy
+# method, params, callback
 sub send { #($self, $method = '', $params = {}, $cb = sub {}) {
   my $self = shift;
   my $cb = ref $_[-1] eq 'CODE' ? pop : undef;
 
-  say 'SEND:';
-  p @_;
+  # say 'SEND:';
+  # p @_;
+
+  # say 'CB:';
+  # p $cb;
 
   my ($method, $params) = @_;
 
