@@ -1,6 +1,6 @@
 package API::Mopidy;
 
-use 5.026;
+use 5.024;
 
 use Mojo::JSON::MaybeXS;
 use Mojo::Base 'Mojo::EventEmitter', -signatures;
