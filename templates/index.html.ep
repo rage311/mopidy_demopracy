@@ -14,7 +14,7 @@
 
   <div class="container">
 
-    <ul class="nav nav-tabs nav-justified">
+    <ul class="nav nav-tabs">
       <li class="active"><a data-toggle="tab" href="#playlist">Playlist</a></li>
       <li><a data-toggle="tab" href="#search">Search</a></li>
     </ul>
@@ -40,11 +40,11 @@
               <td style="vertical-align: middle; text-align: right">
                 <span style="font-size:24px; margin-right:10px">{{getTotalVotes(track)}}</span>
               </td>
-              <td style="vertical-align: middle" v-if="idx !== 0">
-                <div style="margin-bottom:8px">
+              <td style="vertical-align: middle">
+                <div style="margin-bottom:8px" v-if="idx !== 0">
                   <span class="fa fa-thumbs-up vote" value="1" v-on:click="submitVote(track.tlid, 1)" style="font-size:24px;cursor:pointer" />
                 </div>
-                <div>
+                <div v-if="idx !== 0">
                   <span class="fa fa-thumbs-down vote" value="-1" v-on:click="submitVote(track.tlid, -1)" style="font-size:24px;cursor:pointer" />
                 </div>
               </td>
@@ -56,15 +56,19 @@
 
       <div id="search" class="tab-pane fade">
         <br/>
-        <form id="search" class="form-inline" @submit.prevent="search">
+        <form id="search" class="form-inline input-group" @submit.prevent="search">
           <input type="text" class="form-control" placeholder="Song name" v-model="searchText"/>
-          <button type="search" class="btn btn-default"><span class="fa fa-search"/></button>
+          <span class="input-group-btn">
+            <button type="search" class="btn btn-default"><span class="fa fa-search"/></button>
+          </span>
         </form>
+        <br/>
+        <div v-if="searching == 1">Searching...</div>
         <table class="table table-striped table-condensed" id="search_result">
           <tbody>
             <tr v-for="(track, idx) in search_results">
               <td style="vertical-align: middle">
-                <span class="fa fa-plus" v-on:click="addTrack(track.uri)" style="font-size:24px;cursor:pointer;margin-left:10px" />
+                <span v-bind:class="{'fa-plus': !track.isAdded, 'fa-check': track.isAdded}" class="fa" v-on:click="track.isAdded = 1; addTrack(track.uri)" style="font-size:24px;cursor:pointer;margin-left:10px" />
               </td>
               <td style="vertical-align: middle">
                 <div>
@@ -93,6 +97,7 @@
       tracklist: [],
       searchText: null,
       heartbeatInterval: null,
+      searching: 0,
     },
 
     mounted: function () {
@@ -122,6 +127,7 @@
           //self.tracklist && console.log(self.tracklist[0].title);
         }
         else if (local_data.search_result) {
+          self.searching = 0;
           self.search_results = local_data.search_result[0].tracks;
         }
         else if (local_data.event) {
@@ -196,6 +202,8 @@
       },
 
       search: function() {
+        this.searching = 1;
+        this.search_results = [];
         return this.socket.send(JSON.stringify({
           //"search_type": "artist",
           "search_type": "track_name",
