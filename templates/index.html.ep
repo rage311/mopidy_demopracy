@@ -206,7 +206,8 @@
         this.search_results = [];
         return this.socket.send(JSON.stringify({
           //"search_type": "artist",
-          "search_type": "track_name",
+          //"search_type": "track_name",
+          "search_type": "any",
           "search_text": this.searchText,
           "method"     : "search",
           "request_id" : Date.now(),
