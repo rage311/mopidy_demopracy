@@ -52,7 +52,7 @@ sub new ($class) {
   $self->mopidy->send('library.lookup', [ BASE_PLAYLIST_URI ] => sub {
     die 'No base playlist found' if $_[0]->{error};
     $self->base_playlist(shift->{result});
-    p $self->base_playlist;
+    p $self->base_playlist if $ENV{DEBUG} == 1;
     $self->maybe_add_new_track;
   });
 
@@ -67,7 +67,7 @@ sub process_event ($self, $event) {
   say 'process_event:';
 
   say 'EVENT:';
-  p $event;
+  p $event if $ENV{DEBUG} == 1;
 
   warn "event: $event->{event}";
   if ($event->{event} eq 'tracklist_changed') {# && $reordering_tracklist == 0) {

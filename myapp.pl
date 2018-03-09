@@ -107,7 +107,7 @@ helper send_tracklist => sub ($c, $client = undef) {
   say 'Clients:';
   p $c->app->clients;
 
-  p $c->app->jb->tracklist->{array};
+  p $c->app->jb->tracklist->{array} if $ENV{DEBUG};
   $_->send({ json => {tracklist => $c->app->jb->tracklist->{array}} })
     for ($client // values $c->app->clients->%*);
 };
