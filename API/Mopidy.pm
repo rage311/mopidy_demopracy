@@ -1,8 +1,9 @@
 package API::Mopidy;
 
 use 5.026;
-use Mojo::Base 'Mojo::EventEmitter', -signatures;
 
+use Mojo::JSON::MaybeXS;
+use Mojo::Base 'Mojo::EventEmitter', -signatures;
 use Mojo::UserAgent;
 use Mojo::URL;
 use Mojo::Promise;

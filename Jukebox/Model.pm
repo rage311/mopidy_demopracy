@@ -1,6 +1,8 @@
 package Jukebox::Model;
 
 use 5.026;
+
+use Mojo::JSON::MaybeXS;
 use Mojo::Base 'Mojo::EventEmitter', -signatures;
 use API::Mopidy;
 use Mojo::JSON qw(true false);

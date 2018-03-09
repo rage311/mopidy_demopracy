@@ -4,6 +4,7 @@ use 5.026;
 
 use lib '.';
 
+use Mojo::JSON::MaybeXS;
 use Jukebox::Model;
 use Mojo::Base -strict, -signatures;
 use Mojolicious::Lite;
