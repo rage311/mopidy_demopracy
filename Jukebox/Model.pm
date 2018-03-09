@@ -30,7 +30,7 @@ has mopidy => sub ($self) {
   p $mopidy;
   $mopidy->on(error   => sub { p $_[1]; });
   $mopidy->on(event   => sub { $self->process_event(pop) } );
-  $mopidy->on(message => sub { say 'Mopidy message:'; p @_ });
+  $mopidy->on(message => sub { if ($ENV{DEBUG}) { say 'Mopidy message:'; p @_ } });
 
   $mopidy->connect
     ->then (sub { say 'CONNECTED!' and return $_[0] })
