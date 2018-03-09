@@ -25,7 +25,7 @@ helper jb      => sub ($c) {
     $c->app->send_tracklist;
   });
   $jb->on(search_result     => sub ($self, $result) {
-    p @_;
+    p @_ if $ENV{DEBUG} == 1;
     say 'SEARCH RESULT';
     $c->process_reply($result);
   });
@@ -35,7 +35,7 @@ helper jb      => sub ($c) {
 
 helper process_reply => sub ($c, $result) {
   say 'process_reply';
-  p $result;
+  p $result if $ENV{DEBUG} == 1;
   if (index($result->{request_id}, 'Mojo') > -1) {
     $c->client_ws_reply($result);
   }
