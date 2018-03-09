@@ -11,7 +11,7 @@ use DDP;
 use List::Util qw(reduce first);
 
 
-use constant MOPIDY_HOST        => 'i7-arch';#'10.0.0.126';
+use constant MOPIDY_HOST        => '127.0.0.1';#'i7-arch';#'10.0.0.126';
 use constant MOPIDY_PORT        => '6680';
 use constant BASE_PLAYLIST_URI  =>
 #'spotify:user:rage_311:playlist:6KC25FPNEbVdOSZYswg0lq';
