@@ -10,13 +10,8 @@ use Mojo::Promise;
 use Carp qw(carp croak);
 use DDP;
 
-# use constant MOPIDY_IP          => '10.0.0.121';
-# use constant MOPIDY_PORT        => '6680';
-# use constant BASE_PLAYLIST_URI  =>
-#   'spotify:user:rage_311:playlist:5u9o0va3hiIhmlkw70voES';
-
 has 'ua'   => sub { state $ua = Mojo::UserAgent->new->inactivity_timeout(0) };
-has 'ws';#   => sub { state $ws = Mojo::Transaction->new };
+has 'ws';
 has 'host' => sub { croak 'host is required' };
 has 'port';
 
